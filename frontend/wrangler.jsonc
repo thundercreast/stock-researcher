@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "stock-researcher-web",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-11-17",
+  "services": [
+    {
+      "binding": "API",
+      "service": "stock-researcher-private-api"
+    }
+  ]
+}

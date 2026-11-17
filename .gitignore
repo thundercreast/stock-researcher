@@ -1,0 +1,51 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Private application/server source: do not publish in the public web repository
+/backend/
+/cloudflare-private/
+
+# Local databases, caches, and private research
+/storage/
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/cache/
+/private-research/
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node/build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+**/.vite/
+*.tsbuildinfo
+
+# Cloudflare local state
+.wrangler/
+**/.wrangler/
+.dev.vars
+**/.dev.vars
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Internal deployment runbooks are kept out of the public repository
+/docs/CLOUDFLARE-MIGRATION.md
+/PHASE3-NORMALIZATION-FIX.md
