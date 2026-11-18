@@ -44,9 +44,19 @@ export default function FundamentalsPage({ symbol }: Props) {
 
   const statement: FinancialStatement | undefined = payload?.statements?.[activeStatement]
   const periods = useMemo(() => (statement?.periods || []).slice(0, 5), [statement])
-  const latestRatios = payload?.ratios?.[0]?.ratios || []
+  // A company's latest balance-sheet date can be newer than its latest annual
+  // income statement date. Select the most recent available value per ratio,
+  // and retain that ratio's own period so the cards never imply a false common date.
+  const latestRatios = useMemo(() => {
+    const byCode = new Map<string, { code: string; label: string; value: number; unit: string; period_end: string }>()
+    for (const period of payload?.ratios || []) {
+      for (const ratio of period.ratios || []) {
+        if (!byCode.has(ratio.code)) byCode.set(ratio.code, { ...ratio, period_end: period.period_end })
+      }
+    }
+    return [...byCode.values()]
+  }, [payload])
   const ratioCards = latestRatios.filter(r => ['gross_margin', 'operating_margin', 'net_margin', 'return_on_equity', 'current_ratio', 'debt_to_equity'].includes(r.code))
-  const latestPeriod = payload?.periods?.[0]?.period_end
 
   function exportCsv() {
     if (!statement || !periods.length) return
@@ -81,7 +91,7 @@ export default function FundamentalsPage({ symbol }: Props) {
       </div>
 
       <div className="fundamental-metrics">
-        {ratioCards.length ? ratioCards.map(r => <div className="panel fundamental-metric" key={r.code}><small>{r.label.toUpperCase()}</small><b>{numberFmt(r.value, payload.currency, r.unit)}</b><span>{latestPeriod || 'Latest available period'}</span></div>) : <div className="panel fundamental-metric empty-metric"><small>FINANCIAL RATIOS</small><b>Not enough data</b><span>Required line items may not be reported.</span></div>}
+        {ratioCards.length ? ratioCards.map(r => <div className="panel fundamental-metric" key={r.code}><small>{r.label.toUpperCase()}</small><b>{numberFmt(r.value, payload.currency, r.unit)}</b><span>{r.period_end}</span></div>) : <div className="panel fundamental-metric empty-metric"><small>FINANCIAL RATIOS</small><b>Not enough data</b><span>Required line items may not be reported.</span></div>}
       </div>
 
       <div className="panel statement-panel">
