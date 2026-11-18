@@ -6,7 +6,7 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
-  type UTCTimestamp,
+  type BusinessDay,
 } from 'lightweight-charts'
 import type { Bar } from '../services/api'
 
@@ -18,9 +18,19 @@ type Props = {
   showBollinger: boolean
 }
 
+// Provider history uses ISO calendar dates (YYYY-MM-DD). Lightweight Charts
+// expects calendar dates as BusinessDay objects, not Unix timestamps.
+const toBusinessDay = (value: string): BusinessDay => {
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) {
+    throw new Error(`Invalid market-data date: ${value}`)
+  }
+  return { year, month, day }
+}
+
 const toLine = (bars: Bar[], key: keyof Bar) => bars
   .filter(b => typeof b[key] === 'number' && Number.isFinite(b[key] as number))
-  .map(b => ({ time: b.time as UTCTimestamp, value: b[key] as number }))
+  .map(b => ({ time: toBusinessDay(b.time), value: b[key] as number }))
 
 export default function PriceChart({ bars, height = 360, showSma, showEma, showBollinger }: Props) {
   const priceHost = useRef<HTMLDivElement>(null)
@@ -47,13 +57,13 @@ export default function PriceChart({ bars, height = 360, showSma, showEma, showB
     const candles = priceChart.addSeries(CandlestickSeries, {
       upColor: '#20b889', downColor: '#ef626c', borderUpColor: '#20b889', borderDownColor: '#ef626c', wickUpColor: '#20b889', wickDownColor: '#ef626c',
     })
-    candles.setData(valid.map(b => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close })))
+    candles.setData(valid.map(b => ({ time: toBusinessDay(b.time), open: b.open, high: b.high, low: b.low, close: b.close })))
 
     const volume = priceChart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' }, priceScaleId: 'volume', color: '#35506c', lastValueVisible: false, priceLineVisible: false,
     })
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
-    volume.setData(valid.map(b => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? 'rgba(32,184,137,.35)' : 'rgba(239,98,108,.35)' })))
+    volume.setData(valid.map(b => ({ time: toBusinessDay(b.time), value: b.volume, color: b.close >= b.open ? 'rgba(32,184,137,.35)' : 'rgba(239,98,108,.35)' })))
 
     if (showSma) {
       const sma20 = priceChart.addSeries(LineSeries, { color: '#e7b85c', lineWidth: 2, title: 'SMA 20', priceLineVisible: false })
@@ -87,7 +97,7 @@ export default function PriceChart({ bars, height = 360, showSma, showEma, showB
     const histogram = macdChart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false, priceScaleId: 'macd-hist' })
     macd.setData(toLine(valid, 'macd'))
     signal.setData(toLine(valid, 'macd_signal'))
-    histogram.setData(valid.filter(b => b.macd_histogram != null).map(b => ({ time: b.time as UTCTimestamp, value: b.macd_histogram as number, color: (b.macd_histogram as number) >= 0 ? 'rgba(32,184,137,.55)' : 'rgba(239,98,108,.55)' })))
+    histogram.setData(valid.filter(b => b.macd_histogram != null).map(b => ({ time: toBusinessDay(b.time), value: b.macd_histogram as number, color: (b.macd_histogram as number) >= 0 ? 'rgba(32,184,137,.55)' : 'rgba(239,98,108,.55)' })))
     histogram.priceScale().applyOptions({ scaleMargins: { top: .2, bottom: .1 } })
 
     priceChart.timeScale().fitContent()
