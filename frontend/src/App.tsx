@@ -141,7 +141,7 @@ export default function App() {
           <div className="connection-card">
             <div className="connection-title"><Database size={14}/> DATA CONNECTION</div>
             <div className="connection-state"><span className={`status-dot ${apiStatus}`}/>{apiStatus === 'online' ? 'Backend connected' : apiStatus === 'offline' ? 'Backend unavailable' : 'Checking connection'}</div>
-            <small>Local API · 127.0.0.1:8000</small>
+            <small>{import.meta.env.DEV ? 'Local API · 127.0.0.1:8000' : 'Cloudflare · Private API'}</small>
           </div>
           <button className="nav-item"><Settings2 size={16}/>Settings</button>
           <button className="nav-item"><CircleHelp size={16}/>Help & documentation</button>
