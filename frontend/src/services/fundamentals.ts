@@ -6,10 +6,10 @@ export type FinancialStatement = { periods: FinancialPeriod[]; line_items: Finan
 export type FundamentalPayload = {
   symbol: string
   currency: string | null
-  company: { name?: string; sector?: string | null; industry?: string | null; exchange?: string | null; country?: string | null }
+  company: { name?: string; sector?: string | null; industry?: string | null; industry_source?: string | null; profile_source?: string | null; profile_status?: string | null; exchange?: string | null; country?: string | null; website?: string | null; sic_code?: string | null }
   statements: Record<string, FinancialStatement>
   periods: FinancialPeriod[]
-  ratios: Array<{ period_end: string; ratios: Array<{ code: string; label: string; value: number; unit: string }> }>
+  ratios: Array<{ period_end: string; ratios: Array<{ code: string; label: string; value: number; unit: string; basis?: string }> }>
   metadata: { source?: string; provider_status?: string; period_type?: string; cache?: string; fetched_at?: string; retrieved_at?: string; limitations?: string[]; fallback_errors?: string[]; data_model?: string; official_filing_reference?: string; refresh_recommended?: boolean }
   normalization?: { schema_version?: string; mapped_provider_rows?: number; unmapped_provider_rows?: number; unmapped_provider_labels?: string[] }
 }

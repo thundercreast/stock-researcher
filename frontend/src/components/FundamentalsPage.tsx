@@ -57,6 +57,8 @@ export default function FundamentalsPage({ symbol }: Props) {
     return [...byCode.values()]
   }, [payload])
   const ratioCards = latestRatios.filter(r => ['gross_margin', 'operating_margin', 'net_margin', 'return_on_equity', 'current_ratio', 'debt_to_equity'].includes(r.code))
+  const companyClassification = [payload?.company?.sector, payload?.company?.industry ? `${payload.company.industry_source?.includes('SEC') ? 'SIC industry' : 'Industry'}: ${payload.company.industry}` : null].filter(Boolean).join(' · ') || 'Classification not supplied'
+  const companySubtitle = [symbol, companyClassification, payload?.company?.exchange, payload?.company?.country, payload?.currency].filter(Boolean).join(' · ')
 
   function exportCsv() {
     if (!statement || !periods.length) return
@@ -86,12 +88,12 @@ export default function FundamentalsPage({ symbol }: Props) {
     {payload && <>
       <div className="fundamental-company panel">
         <div className="fundamental-company-icon"><Building2 size={19}/></div>
-        <div className="fundamental-company-name"><b>{payload.company?.name || symbol}</b><span>{symbol} · {payload.company?.sector || 'Sector not supplied'} · {payload.currency || 'Currency not supplied'}</span></div>
+        <div className="fundamental-company-name"><b>{payload.company?.name || symbol}</b><span>{companySubtitle}</span></div>
         <div className="source-chip"><CheckCircle2 size={12}/>{payload.metadata?.provider_status === 'regulatory_filing_data' ? 'REGULATORY SOURCE' : 'PROVIDER DATA'}</div>
       </div>
 
       <div className="fundamental-metrics">
-        {ratioCards.length ? ratioCards.map(r => <div className="panel fundamental-metric" key={r.code}><small>{r.label.toUpperCase()}</small><b>{numberFmt(r.value, payload.currency, r.unit)}</b><span>{r.period_end}</span></div>) : <div className="panel fundamental-metric empty-metric"><small>FINANCIAL RATIOS</small><b>Not enough data</b><span>Required line items may not be reported.</span></div>}
+        {ratioCards.length ? ratioCards.map(r => <div className="panel fundamental-metric" key={r.code}><small>{r.label.toUpperCase()}</small><b>{numberFmt(r.value, payload.currency, r.unit)}</b><span>{r.period_end}{r.basis === 'quarterly_period_not_annualized' ? ' · Quarterly, not annualized' : ''}</span></div>) : <div className="panel fundamental-metric empty-metric"><small>FINANCIAL RATIOS</small><b>Not enough data</b><span>Required line items may not be reported.</span></div>}
       </div>
 
       <div className="panel statement-panel">
