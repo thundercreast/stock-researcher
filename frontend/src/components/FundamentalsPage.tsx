@@ -57,7 +57,7 @@ export default function FundamentalsPage({ symbol }: Props) {
     return [...byCode.values()]
   }, [payload])
   const ratioCards = latestRatios.filter(r => ['gross_margin', 'operating_margin', 'net_margin', 'return_on_equity', 'current_ratio', 'debt_to_equity'].includes(r.code))
-  const companyClassification = [payload?.company?.sector, payload?.company?.industry ? `${payload.company.industry_source?.includes('SEC') ? 'SIC industry' : 'Industry'}: ${payload.company.industry}` : null].filter(Boolean).join(' · ') || 'Classification not supplied'
+  const companyClassification = [payload?.company?.sector ? `${payload.company.sector_source?.includes('SEC SIC') ? 'SIC sector' : 'Sector'}: ${payload.company.sector}` : null, payload?.company?.industry ? `${payload.company.industry_source?.includes('SEC') ? 'SIC industry' : 'Industry'}: ${payload.company.industry}` : null].filter(Boolean).join(' · ') || 'Classification not supplied'
   const companySubtitle = [symbol, companyClassification, payload?.company?.exchange, payload?.company?.country, payload?.currency].filter(Boolean).join(' · ')
 
   function exportCsv() {

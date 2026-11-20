@@ -6,7 +6,7 @@ export type FinancialStatement = { periods: FinancialPeriod[]; line_items: Finan
 export type FundamentalPayload = {
   symbol: string
   currency: string | null
-  company: { name?: string; sector?: string | null; industry?: string | null; industry_source?: string | null; profile_source?: string | null; profile_status?: string | null; exchange?: string | null; country?: string | null; website?: string | null; sic_code?: string | null }
+  company: { name?: string; sector?: string | null; sector_source?: string | null; industry?: string | null; industry_source?: string | null; profile_source?: string | null; profile_status?: string | null; exchange?: string | null; country?: string | null; website?: string | null; sic_code?: string | null }
   statements: Record<string, FinancialStatement>
   periods: FinancialPeriod[]
   ratios: Array<{ period_end: string; ratios: Array<{ code: string; label: string; value: number; unit: string; basis?: string }> }>
