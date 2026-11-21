@@ -998,3 +998,270 @@ function applyComputerMoveChoice(choice,preFen,token){
   $('status').textContent='Your turn. Game mode is uninterrupted: make your move when ready.';
   $('userLabel').textContent='GAME MODE · YOUR TURN';
   $('computerLabel').textContent='COMPUTER LAST MOVE';
+  $('computerPlan').innerHTML=`<span class="tag gold">Computer played · ${escapeHtml(lastMove.san)}</span><p>The match continues. Full analysis will be available when the game ends.</p>`;
+ }
+}
+async function startComputerGameV4(){
+ if(gameOver()){phase='finished';renderBoard();finishCompletedGame(gameResultCode(),resultText());return}
+ phase='computer';renderBoard();
+ $('computerPlan').innerHTML='<span class="tag gold">Computer is thinking</span><p>It is weighing candidate continuations in the current position.</p><div class="thinkingbar"><i></i></div>';
+ const token=gameToken,fen=game.fen();
+ let candidates=[];
+ if(sfReady){
+  const r=await analyseFen(fen,3,analysisDepth());
+  if(token!==gameToken||phase!=='computer'||replayRecord)return;
+  candidates=normaliseEngineLines(fen,r);
+ }
+ if(!candidates.length)candidates=heuristicCandidates(fen,3);
+ const choice=await chooseOpponentMove(fen,candidates);
+ if(token!==gameToken||phase!=='computer'||replayRecord)return;
+ applyComputerMoveChoice(choice,fen,token);
+}
+startComputerGame=startComputerGameV4;
+async function playComputerMoveV4(){
+ if(phase!=='predict'||gameOver()||replayRecord)return;
+ const token=gameToken,fen=game.fen();phase='computer';$('computerLabel').textContent='COMPUTER TO MOVE';
+ $('computerPlan').innerHTML='<span class="tag gold">Computer calculating</span><p>Comparing plausible continuations…</p><div class="thinkingbar"><i></i></div>';renderBoard();
+ let candidates=pendingCandidates;
+ if(!candidates.length&&sfReady){const r=await analyseFen(fen,3,analysisDepth());if(token!==gameToken||phase!=='computer')return;candidates=normaliseEngineLines(fen,r)}
+ const choice=await chooseOpponentMove(fen,candidates);
+ if(token!==gameToken||phase!=='computer')return;
+ applyComputerMoveChoice(choice,fen,token);
+}
+playComputerMove=playComputerMoveV4;
+
+function resignHuman(){
+ if(phase==='finished'||phase==='replay'||gameOver())return;
+ const winner=human==='w'?'0-1':'1-0';
+ finishCompletedGame(winner,'You resigned. The computer wins by resignation.');
+ $('status').textContent='You resigned. The computer wins.';
+}
+async function offerComputerResignation(){
+ if(phase==='finished'||phase==='replay'||gameOver())return;
+ if(!sfReady){$('status').textContent='The computer cannot assess resignation while Stockfish is unavailable.';return}
+ if(sfPending){$('status').textContent='The engine is busy. Try again after its current calculation.';return}
+ $('status').textContent='Asking the computer to assess its position…';
+ const comp=human==='w'?'b':'w',fen=game.fen(),r=await analyseFen(fen,1,10);
+ if(!r||!r.lines||!r.lines[0]||r.lines[0].score===null){$('status').textContent='The computer could not verify a resignation. It will continue playing.';return}
+ const evalComp=scoreToPerspective(r.lines[0],fen,comp);
+ if(evalComp!==null&&evalComp<=-800){
+  const win=human==='w'?'1-0':'0-1';
+  finishCompletedGame(win,'Computer resigns: the engine assessed its position as decisively lost.');
+ }else{$('status').textContent='The computer declines to resign. It believes the position is still playable.'}
+}
+function finishCompletedGame(result,reason){
+ if(!activeRecord||replayRecord)return;
+ if(activeRecord.analysisStarted)return;
+ gameToken++;if(sfPending&&sfWorker){try{sfWorker.postMessage('stop')}catch(e){}}
+ activeRecord.analysisStarted=true;
+ activeRecord.manualResult=result;activeRecord.result=result;activeRecord.complete=true;activeRecord.endReason=reason||result;
+ activeRecord.updatedAt=Date.now();
+ if(currentMode==='game'&&!activeRecord.ratingApplied){
+  const before=localGameRating,opp=Number($('opponentRating').value||1200);
+  const humanScore=result==='1-0'?(human==='w'?1:0):result==='0-1'?(human==='b'?1:0):.5;
+  const expected=1/(1+Math.pow(10,(opp-before)/400)),delta=Math.round(24*(humanScore-expected));
+  localGameRating=Math.max(100,before+delta);activeRecord.ratingBefore=before;activeRecord.ratingAfter=localGameRating;activeRecord.ratingDelta=localGameRating-before;activeRecord.ratingApplied=true;
+  try{localStorage.setItem(RATING_KEY,String(localGameRating))}catch(e){}
+  $('localRatingValue').textContent=String(localGameRating);$('lastRatingDelta').textContent=(delta>=0?'+':'')+delta+' after this game';
+ }
+ phase='finished';syncRecord();renderBoard();
+ $('status').className='status finished';$('status').textContent=reason||result;
+ $('postGameAnalysis').style.display='block';$('postGameStatus').textContent='PREPARING FULL REPORT';
+ $('postGameContent').innerHTML='<p class="muted">Replaying the saved moves and assessing the full game…</p><div class="thinkingbar"><i></i></div>';
+ if(currentMode==='tutor')$('questionArea').innerHTML='';
+ runCompleteGameAnalysis(activeRecord);
+}
+function evalAsWhite(result,fen){
+ const line=result&&result.lines&&result.lines[0];if(!line||line.score===null||line.score===undefined)return null;
+ const cp=line.score,turn=fenTurn(fen);return turn==='w'?cp:-cp;
+}
+function labelLoss(loss){
+ if(loss===null)return {label:'Not engine-rated',cls:'warn'};
+ if(loss>2)return {label:'Blunder',cls:'bad'};
+ if(loss>.9)return {label:'Mistake',cls:'bad'};
+ if(loss>.35)return {label:'Inaccuracy',cls:'warn'};
+ if(loss<-.2)return {label:'Excellent',cls:'good'};
+ return {label:'Good',cls:'good'};
+}
+async function runCompleteGameAnalysis(record){
+ const run=++analysisRun;
+ // A resignation can happen while the engine is finishing an earlier search.
+ // Wait briefly for UCI "bestmove" to release the worker before the report starts.
+ for(let wait=0;sfPending&&wait<40;wait++)await new Promise(resolve=>setTimeout(resolve,100));
+ if(run!==analysisRun)return;
+ if(sfPending){try{sfWorker.terminate()}catch(e){}sfReady=false;sfPending=null;$('engineDot').classList.remove('ready');$('engineState').textContent='Built-in analysis active'}
+ const root=record.startFen||STANDARD_FEN,copy=new Chess(root),fens=[copy.fen()],moves=[];
+ for(const saved of record.moves||[]){
+  const m=copy.move(parseUci(saved.uci));if(!m)break;
+  moves.push({uci:saved.uci,san:m.san,color:m.color,piece:m.piece,captured:m.captured||null,flags:m.flags,fenBefore:fens[fens.length-1],fenAfter:copy.fen()});
+  fens.push(copy.fen());
+ }
+ const evals=new Array(fens.length).fill(null);
+ if(sfReady){
+  for(let i=0;i<fens.length;i++){
+   if(run!==analysisRun)return;
+   $('postGameStatus').textContent=`ANALYSING POSITION ${i+1} / ${fens.length}`;
+   const result=await analyseFen(fens[i],1,7,null,6500);
+   if(run!==analysisRun)return;
+   evals[i]=evalAsWhite(result,fens[i]);
+  }
+ }
+ const rows=moves.map((m,i)=>{
+  const before=evals[i],after=evals[i+1],loss=before===null||after===null?null:(m.color==='w'?before-after:after-before);
+  const grade=labelLoss(loss);
+  let note=moveIntent(m.fenBefore,m.uci).detail;
+  if(loss!==null&&loss>.9)note+=' Review the opponent’s strongest response; this move significantly changed the evaluation.';
+  return {...m,loss,grade,note};
+ });
+ const mistakes=rows.filter(r=>r.loss!==null&&r.loss>.9).sort((a,b)=>b.loss-a.loss).slice(0,5);
+ const summary=`${moves.length} half-moves · ${mistakes.length} significant mistake(s) detected`;
+ let html=`<div class="rating-big"><div><span class="muted">Game result</span><strong style="font-size:19px">${escapeHtml(record.endReason||record.result||'Completed')}</strong></div><div class="rating-delta">${escapeHtml(summary)}</div></div>`;
+ if(record.mode==='game'&&record.ratingDelta!==null&&record.ratingDelta!==undefined)html+=`<p class="muted">Local rating: ${record.ratingBefore} → <b>${record.ratingAfter}</b> (${record.ratingDelta>=0?'+':''}${record.ratingDelta}) against nominal ${record.opponentRating} strength.</p>`;
+ if(!sfReady)html+='<p class="muted">Stockfish was unavailable, so every move is listed with a rule-based strategic note. Centipawn loss and engine accuracy were not calculated.</p>';
+ else html+='<p class="muted">Engine review uses a lightweight depth-7 evaluation of every position. Centipawn loss is approximate and may differ from deeper desktop analysis.</p>';
+ if(mistakes.length)html+=`<div class="analysis-section"><h3>Critical moments to revisit</h3><p>${mistakes.map(m=>`${escapeHtml(m.san)} (${m.color==='w'?'White':'Black'}) · ${m.loss.toFixed(2)} pawn loss`).join('<br>')}</p></div>`;
+ else html+='<div class="analysis-section"><h3>Critical moments</h3><p>No large evaluation swings were identified at the analysis depth used, or the engine was unavailable.</p></div>';
+ html+='<h3 style="margin:14px 0 4px">Complete move-by-move report</h3><div style="overflow:auto"><table class="analysis-table"><thead><tr><th>#</th><th>Side</th><th>Move</th><th>Assessment</th><th>Eval loss</th><th>Strategic note</th></tr></thead><tbody>';
+ rows.forEach((r,i)=>{html+=`<tr><td>${i+1}</td><td>${r.color==='w'?'White':'Black'}</td><td><b>${escapeHtml(r.san)}</b></td><td class="${r.grade.cls}">${r.grade.label}</td><td>${r.loss===null?'—':r.loss.toFixed(2)}</td><td>${escapeHtml(r.note)}</td></tr>`});
+ html+='</tbody></table></div>';
+ $('postGameContent').innerHTML=html;$('postGameStatus').textContent='REPORT COMPLETE';record.analysisSummary=summary;syncRecord();
+}
+function replayRender(){
+ if(!replayRecord)return;
+ game.load(replayRecord.startFen||STANDARD_FEN);
+ const moves=replayRecord.moves||[];
+ for(let i=0;i<Math.min(replayIndex,moves.length);i++){
+  const m=game.move(parseUci(moves[i].uci));if(!m)break;
+ }
+ lastMove=game.history({verbose:true}).slice(-1)[0]||null;selected=null;targets=[];
+ phase='replay';renderBoard();phase='replay';
+ $('status').className='status';$('status').textContent=`Replay · ${replayRecord.name} · position ${replayIndex} of ${moves.length}`;
+ $('undo').disabled=true;$('resignMe').disabled=true;$('offerComputerResign').disabled=true;
+ $('replayPosition').textContent=`${replayIndex} / ${moves.length} plies`;
+ $('replaySlider').max=String(moves.length);$('replaySlider').value=String(replayIndex);$('replaySlider').disabled=false;
+ $('replayBack').disabled=replayIndex===0;$('replayStart').disabled=replayIndex===0;
+ $('replayForward').disabled=replayIndex===moves.length;$('replayEnd').disabled=replayIndex===moves.length;
+ $('continueFromHere').disabled=gameOver();
+ $('branchHint').textContent=gameOver()?'This position is terminal. Go back one or more moves to create a variation.':'Create a new iteration from this exact position.';
+ scanBothSides();
+}
+function openReplay(id){
+ const rec=archiveGames.find(r=>r.id===id);if(!rec)return;
+ replayRecord=rec;replayIndex=0;currentMode=rec.mode||'tutor';human=rec.humanColor||human;
+ $('color').value=human;$('opponentRating').value=String(rec.opponentRating||1200);
+ updateModeUI();
+ $('postGameAnalysis').style.display=rec.complete?'block':'none';
+ replayRender();
+}
+function stepReplay(to){if(!replayRecord)return;replayIndex=Math.max(0,Math.min(replayRecord.moves.length,to));replayRender()}
+function continueFromReplay(){
+ if(!replayRecord||gameOver())return;
+ $('resignMe').disabled=false;$('offerComputerResign').disabled=false;
+ const parent=replayRecord,index=replayIndex,prefix=(parent.moves||[]).slice(0,index);
+ const rootName=parent.rootName||rootNameOf(parent.name),name=nextIterationName(rootName),oldMode=parent.mode||'tutor';
+ currentMode=oldMode;human=parent.humanColor||human;$('color').value=human;$('opponentRating').value=String(parent.opponentRating||1200);replayRecord=null;replayIndex=0;
+ game.load(parent.startFen||STANDARD_FEN);
+ for(const item of prefix){if(!game.move(parseUci(item.uci))){$('status').textContent='Could not reconstruct that position. The source game may be damaged.';return}}
+ activeRecord=freshRecord(name,parent,prefix);activeRecord.rootName=rootName;activeRecord.mode=oldMode;
+ gameToken++;analysisRun++;pendingCandidates=[];chosenPrediction=null;selected=null;targets=[];lastMove=game.history({verbose:true}).slice(-1)[0]||null;
+ phase=gameOver()?'finished':game.turn()===human?'human':'computer';
+ updateModeUI();$('postGameAnalysis').style.display='none';
+ $('userAnalysis').innerHTML=`<span class="tag">New variation</span><h2>${escapeHtml(name)}</h2><p>This iteration starts from move ${index}. The original game remains unchanged.</p>`;
+ $('computerPlan').innerHTML='<span class="tag gold">Alternate continuation</span><p>Try a different idea from this position and compare the result with the main game.</p>';
+ $('questionArea').innerHTML='';renderBoard();scanBothSides();saveGame();
+ if(phase==='computer')startComputerGameV4();
+}
+function startGameMode(){$('opponentRating').title='Nominal opponent target. The sub-1320 levels use an approximate mistake model.'}
+function updateLocalRating(){
+ try{localGameRating=Math.max(100,Number(localStorage.getItem(RATING_KEY)||1000)||1000)}catch(e){localGameRating=1000}
+ $('localRatingValue').textContent=String(localGameRating);
+}
+
+function scheduleGithubSync(){} // Cloud token sync removed. Game saves remain local.
+
+function deleteSelectedSavedGame(){
+ const id=$('savedGameSelect').value;
+ if(!id){$('status').textContent='Select a saved game first.';return}
+ const rec=archiveGames.find(x=>x.id===id);if(!rec)return;
+ const ok=confirm(`Permanently delete "${rec.name}" and its saved replay? This cannot be undone.`);
+ if(!ok)return;
+ archiveGames=archiveGames.filter(x=>x.id!==id);
+ if(replayRecord&&replayRecord.id===id){
+  replayRecord=null;replayIndex=0;
+  game.reset();phase='human';lastMove=null;selected=null;targets=[];
+  $('replayPosition').textContent='Not replaying';$('replaySlider').value=0;$('replaySlider').max=0;$('replaySlider').disabled=true;
+  $('continueFromHere').disabled=true;$('resignMe').disabled=false;$('offerComputerResign').disabled=false;
+  $('postGameAnalysis').style.display='none';
+  renderBoard();scanBothSides();
+ }
+ if(activeRecord&&activeRecord.id===id){
+  activeRecord=null;
+ }
+ persistArchive();renderArchiveList();
+ $('savedGameSelect').value='';
+ $('deleteSavedGame').disabled=true;
+ $('branchHint').textContent='Saved game deleted.';
+ $('status').textContent=`Deleted "${rec.name}".`;
+}
+
+function initV4(){
+ archiveGames=loadArchive();updateLocalRating();
+ const rating=$('opponentRating');rating.innerHTML='';
+ for(let n=200;n<=3200;n+=100){const o=document.createElement('option');o.value=String(n);o.textContent=n+' Elo · '+(n<1320?'approximate practice level':'Stockfish strength target');if(n===1200)o.selected=true;rating.appendChild(o)}
+ $('tutorModeBtn').onclick=()=>switchMode('tutor');
+ $('gameModeBtn').onclick=()=>switchMode('game');
+ $('newGame').onclick=createNewMainGame;
+ $('resignMe').onclick=resignHuman;
+ $('offerComputerResign').onclick=offerComputerResignation;
+ $('savedGameSelect').onchange=()=>{};
+ $('openSavedGame').onclick=()=>{if($('savedGameSelect').value)openReplay($('savedGameSelect').value)};
+ $('deleteSavedGame').onclick=deleteSelectedSavedGame;
+ $('savedGameSelect').onchange=()=>{$('deleteSavedGame').disabled=!$('savedGameSelect').value;};
+ $('replayStart').onclick=()=>stepReplay(0);
+ $('replayBack').onclick=()=>stepReplay(replayIndex-1);
+ $('replayForward').onclick=()=>stepReplay(replayIndex+1);
+ $('replayEnd').onclick=()=>{if(replayRecord)stepReplay(replayRecord.moves.length)};
+ $('replaySlider').oninput=()=>stepReplay(Number($('replaySlider').value));
+ $('continueFromHere').onclick=continueFromReplay;
+ $('opponentRating').onchange=()=>{if(activeRecord&&!activeRecord.moves.length){activeRecord.opponentRating=Number($('opponentRating').value);saveGame()}updateModeUI()};
+ $('undo').onclick=()=>{
+  if(replayRecord){$('status').textContent='You are viewing a saved game. Use the replay controls or Continue from here.';return}
+  if(phase==='computer'||phase==='finished')return;
+  gameToken++;if(sfPending&&sfWorker)sfWorker.postMessage('stop');
+  if(!game.undo())return;
+  if(game.turn()!==human&&game.history().length)game.undo();
+  lastMove=game.history({verbose:true}).slice(-1)[0]||null;selected=null;targets=[];pendingCandidates=[];chosenPrediction=null;phase=game.game_over()?'finished':game.turn()===human?'human':'computer';
+  $('userAnalysis').innerHTML='<span class="tag">Position restored</span><h2>Try another idea</h2><p>Compare what your candidate moves attack, defend or leave vulnerable.</p>';
+  $('computerPlan').innerHTML='<span class="tag gold">Reconsider the position</span><p>Candidate plans will update from the current board.</p>';$('questionArea').innerHTML='';
+  renderBoard();scanBothSides();saveGame();if(phase==='computer')startComputerGameV4();
+ };
+ $('hint').onclick=()=>{
+  if(currentMode==='game'){$('status').textContent='Game mode does not provide move hints. Complete the game for a full report.';return}
+  const threat=scanSide(human).underPressure[0];
+  $('userAnalysis').innerHTML=`<span class="tag">Thinking checklist</span><h2>Find forcing moves first</h2><div class="analysis-section"><h3>1. Checks</h3><p>Can you give a useful check or must you respond to one?</p></div><div class="analysis-section"><h3>2. Captures</h3><p>Calculate the recapture before assuming a piece is free.</p></div><div class="analysis-section"><h3>3. Threats</h3><p>${threat?'The scan flags '+escapeHtml(threat.label)+' as under pressure.':'Scan for attacked and undefended pieces.'}</p></div>`;
+ };
+ $('flip').onclick=()=>{flipped=!flipped;renderBoard()};
+ $('color').onchange=()=>{createNewMainGame()};
+ $('pace').onchange=()=>saveGame();
+ $('moveMode').onchange=()=>{selected=null;targets=[];renderBoard();saveGame()};
+ $('copyMoves').onclick=()=>copyText(pgnText()).then(()=>$('status').textContent='PGN copied to clipboard.');
+ $('copyText').onclick=()=>copyText(moveHistoryText()).then(()=>$('status').textContent='Move list copied to clipboard.');
+ $('downloadMoves').onclick=()=>{
+  const blob=new Blob([pgnText()],{type:'application/x-chess-pgn'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=(activeRecord?activeRecord.name:'chess-game').replace(/[^a-z0-9-]+/gi,'_')+'.pgn';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ };
+ $('promotionModal').addEventListener('click',ev=>{if(ev.target===$('promotionModal'))$('promotionModal').classList.remove('open')});
+ document.addEventListener('keydown',ev=>{if(ev.key==='Escape')$('promotionModal').classList.remove('open')});
+ updateModeUI();renderArchiveList();
+ activeRecord=freshRecord();renderBoard();scanBothSides();
+ if(human==='b')startComputerGameV4();
+}
+
+initEngine();initV4();
+
+/* Expose a tiny diagnostic hook for local testing without altering gameplay. */
+window.__chessTutorV3={game,scanSide,attackersTo,get phase(){return phase},get engineReady(){return sfReady}};
+})();
+</script>
+</body>
+</html>
